@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//opt/**)",
+      "Bash(curl:*)",
+      "Bash(cp .env:*)",
+      "Bash(container run:*)",
+      "Bash(pip3 install:*)",
+      "Bash(docker info:*)",
+      "Bash(CONTAINER_RUNTIME=docker ./build.sh:*)",
+      "Bash(bash:*)",
+      "Bash(npx tsx:*)",
+      "Bash(npm run:*)",
+      "Bash(sqlite3:*)",
+      "Bash(launchctl:*)",
+      "Bash(ls:*)",
+      "Bash(docker run:*)"
+    ]
+  }
+}
