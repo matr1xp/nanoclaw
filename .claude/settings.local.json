@@ -14,7 +14,17 @@
       "Bash(sqlite3:*)",
       "Bash(launchctl:*)",
       "Bash(ls:*)",
-      "Bash(docker run:*)"
+      "Bash(docker run:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:remotion.dev)",
+      "WebFetch(domain:www.remotion.dev)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm view:*)",
+      "Bash(npm install:*)",
+      "Bash(docker builder:*)",
+      "Bash(docker build:*)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
