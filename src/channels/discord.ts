@@ -5,8 +5,10 @@ import {
   Message,
   TextChannel,
 } from 'discord.js';
+import path from 'path';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+import { processImage } from '../image.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -60,6 +62,9 @@ export class DiscordChannel implements Channel {
       const sender = message.author.id;
       const msgId = message.id;
 
+      // Check if registered group early (needed for image processing)
+      const group = this.opts.registeredGroups()[chatJid];
+
       // Determine chat name
       let chatName: string;
       if (message.guild) {
@@ -92,26 +97,52 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Handle attachments — store placeholders so the agent knows something was sent
+      // Handle attachments — download and process images, placeholders for others
       if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map(
-          (att) => {
-            const contentType = att.contentType || '';
-            if (contentType.startsWith('image/')) {
-              return `[Image: ${att.name || 'image'}]`;
-            } else if (contentType.startsWith('video/')) {
-              return `[Video: ${att.name || 'video'}]`;
-            } else if (contentType.startsWith('audio/')) {
-              return `[Audio: ${att.name || 'audio'}]`;
-            } else {
-              return `[File: ${att.name || 'file'}]`;
+        const attachmentResults: string[] = [];
+
+        for (const att of message.attachments.values()) {
+          const contentType = att.contentType || '';
+
+          if (contentType.startsWith('image/') && group) {
+            // Download and process image for vision
+            try {
+              const response = await fetch(att.url);
+              if (response.ok) {
+                const buffer = Buffer.from(await response.arrayBuffer());
+                const groupDir = path.join(GROUPS_DIR, group.folder);
+                const result = await processImage(buffer, groupDir, '');
+                if (result) {
+                  attachmentResults.push(result.content);
+                } else {
+                  attachmentResults.push(`[Image: ${att.name || 'image'}]`);
+                }
+              } else {
+                attachmentResults.push(`[Image: ${att.name || 'image'}]`);
+              }
+            } catch (err) {
+              logger.warn(
+                { err, url: att.url },
+                'Discord - image download failed',
+              );
+              attachmentResults.push(`[Image: ${att.name || 'image'}]`);
             }
-          },
-        );
+          } else if (contentType.startsWith('image/')) {
+            // Fallback placeholder if group not registered
+            attachmentResults.push(`[Image: ${att.name || 'image'}]`);
+          } else if (contentType.startsWith('video/')) {
+            attachmentResults.push(`[Video: ${att.name || 'video'}]`);
+          } else if (contentType.startsWith('audio/')) {
+            attachmentResults.push(`[Audio: ${att.name || 'audio'}]`);
+          } else {
+            attachmentResults.push(`[File: ${att.name || 'file'}]`);
+          }
+        }
+
         if (content) {
-          content = `${content}\n${attachmentDescriptions.join('\n')}`;
+          content = `${content}\n${attachmentResults.join('\n')}`;
         } else {
-          content = attachmentDescriptions.join('\n');
+          content = attachmentResults.join('\n');
         }
       }
 
@@ -142,7 +173,6 @@ export class DiscordChannel implements Channel {
       );
 
       // Only deliver full message for registered groups
-      const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
         logger.debug(
           { chatJid, chatName },
@@ -169,12 +199,12 @@ export class DiscordChannel implements Channel {
     });
 
     // Handle errors gracefully
-    this.client.on(Events.Error, (err) => {
+    this.client.on(Events.Error, (err: Error) => {
       logger.error({ err: err.message }, 'Discord client error');
     });
 
     return new Promise<void>((resolve) => {
-      this.client!.once(Events.ClientReady, (readyClient) => {
+      this.client!.once(Events.ClientReady, (readyClient: Client<true>) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
           'Discord bot connected',

@@ -1,6 +1,9 @@
 import { Bot } from 'grammy';
+import path from 'path';
+import fs from 'fs';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+import { processImage } from '../image.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -165,13 +168,121 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    this.bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
+      const caption = ctx.message.caption ?? '';
+
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
+
+      // Download and process the photo
+      let content = '[Photo]';
+      try {
+        // Get the largest photo size (last in array)
+        const photos = ctx.message.photo;
+        const largestPhoto = photos[photos.length - 1];
+        const file = await ctx.getFile();
+        const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const response = await fetch(fileUrl);
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        const groupDir = path.join(GROUPS_DIR, group.folder);
+        const result = await processImage(buffer, groupDir, caption);
+        if (result) {
+          content = result.content;
+        }
+      } catch (err) {
+        logger.warn({ err, chatJid }, 'Telegram photo - download failed');
+        if (caption) content = `[Photo] ${caption}`;
+      }
+
+      this.opts.onMessage(chatJid, {
+        id: ctx.message.message_id.toString(),
+        chat_jid: chatJid,
+        sender: ctx.from?.id?.toString() || '',
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+      });
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
+    this.bot.on('message:document', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
+      const caption = ctx.message.caption ?? '';
       const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
+
+      let content = `[Document: ${name}]`;
+      try {
+        const file = await ctx.getFile();
+        const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const response = await fetch(fileUrl);
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        const groupDir = path.join(GROUPS_DIR, group.folder);
+        const attachmentsDir = path.join(groupDir, 'attachments');
+        fs.mkdirSync(attachmentsDir, { recursive: true });
+
+        const safeName = name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const filename = `doc-${Date.now()}-${safeName}`;
+        const filePath = path.join(attachmentsDir, filename);
+        fs.writeFileSync(filePath, buffer);
+
+        const relativePath = `attachments/${filename}`;
+        content = caption
+          ? `[Document: ${relativePath}] ${caption}`
+          : `[Document: ${relativePath}]`;
+      } catch (err) {
+        logger.warn({ err, chatJid }, 'Telegram document - download failed');
+        if (caption) content = `${content} ${caption}`;
+      }
+
+      this.opts.onMessage(chatJid, {
+        id: ctx.message.message_id.toString(),
+        chat_jid: chatJid,
+        sender: ctx.from?.id?.toString() || '',
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+      });
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
@@ -203,6 +314,16 @@ export class TelegramChannel implements Channel {
     });
   }
 
+  /**
+   * Convert GitHub-flavored markdown to Telegram markdown format.
+   * Telegram uses *bold* (single asterisk) and _italic_, not **bold** and __italic__.
+   */
+  private toTelegramMarkdown(text: string): string {
+    return text
+      .replace(/\*\*(.+?)\*\*/g, '*$1*') // **bold** -> *bold*
+      .replace(/__(.+?)__/g, '_$1_'); // __underline__ -> _italic_ (best effort)
+  }
+
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
@@ -211,16 +332,20 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
+      const formatted = this.toTelegramMarkdown(text);
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+      if (formatted.length <= MAX_LENGTH) {
+        await this.bot.api.sendMessage(numericId, formatted, {
+          parse_mode: 'Markdown',
+        });
       } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        for (let i = 0; i < formatted.length; i += MAX_LENGTH) {
           await this.bot.api.sendMessage(
             numericId,
-            text.slice(i, i + MAX_LENGTH),
+            formatted.slice(i, i + MAX_LENGTH),
+            { parse_mode: 'Markdown' },
           );
         }
       }
