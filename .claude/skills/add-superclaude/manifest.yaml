@@ -1,0 +1,11 @@
+skill: superclaude
+version: 1.0.0
+description: "SuperClaude Framework CLI and MCP tools integration"
+core_version: 0.1.0
+adds: []
+modifies:
+  - container/Dockerfile
+  - container/agent-runner/src/index.ts
+conflicts: []
+depends: []
+test: "npm run build"

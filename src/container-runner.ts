@@ -220,6 +220,7 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'GITHUB_TOKEN',
   ]);
 }
 
@@ -231,6 +232,9 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Disable git credential prompts (prevents "could not read Username" errors)
+  args.push('-e', 'GIT_TERMINAL_PROMPT=0');
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
