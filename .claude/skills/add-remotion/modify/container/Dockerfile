@@ -26,36 +26,12 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     poppler-utils \
-    python3 \
-    python3-venv \
-    pipx \
     && rm -rf /var/lib/apt/lists/*
-
-# Setup pipx environment
-ENV PIPX_HOME=/opt/pipx
-ENV PIPX_BIN_DIR=/usr/local/bin
-ENV PATH="/usr/local/bin:${PATH}"
-
-# Install and configure SuperClaude
-RUN pipx install superclaude
-RUN superclaude install
 
 # Set Chromium path for agent-browser and Remotion
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 ENV REMOTION_CHROMIUM_PATH=/usr/bin/chromium
-
-# Disable git credential helpers for non-interactive cloning
-ENV GIT_TERMINAL_PROMPT=0
-RUN git config --global credential.helper ""
-RUN git config --global init.defaultBranch main
-# Create credential helper that reads from GITHUB_TOKEN env var at runtime
-# Uses echo to avoid showing token in process list (more secure)
-RUN echo '#!/bin/bash' > /usr/local/bin/git-credential-github
-RUN echo 'echo "username=x"' >> /usr/local/bin/git-credential-github
-RUN echo 'echo "password=$GITHUB_TOKEN"' >> /usr/local/bin/git-credential-github
-RUN chmod +x /usr/local/bin/git-credential-github
-RUN git config --global credential.https://github.com.helper /usr/local/bin/git-credential-github
 
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code

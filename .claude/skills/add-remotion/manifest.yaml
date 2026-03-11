@@ -1,0 +1,28 @@
+skill: remotion
+version: 1.0.0
+description: "Video generation via Remotion framework with headless rendering"
+core_version: 0.1.0
+adds:
+  - container/agent-runner/src/remotion-mcp-stdio.ts
+  - container/remotion-templates/text-to-video/package.json
+  - container/remotion-templates/text-to-video/tsconfig.json
+  - container/remotion-templates/text-to-video/remotion.config.ts
+  - container/remotion-templates/text-to-video/src/index.ts
+  - container/remotion-templates/text-to-video/src/Root.tsx
+  - container/remotion-templates/text-to-video/src/TextVideo.tsx
+  - container/skills/remotion/SKILL.md
+modifies:
+  - container/Dockerfile
+  - container/agent-runner/package.json
+  - container/agent-runner/src/index.ts
+structured:
+  npm_dependencies:
+    "remotion": "^4.0.0"
+    "@remotion/bundler": "^4.0.0"
+    "@remotion/renderer": "^4.0.0"
+  env_additions:
+    - REMOTION_CONCURRENCY
+    - REMOTION_QUALITY
+conflicts: []
+depends: []
+test: "npm run build"
